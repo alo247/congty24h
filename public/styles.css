@@ -13,7 +13,7 @@ body {
 }
 
 .container {
-    max-width: 1200px;
+    max-width: 1100px;
     margin: 0 auto;
 }
 
@@ -46,46 +46,49 @@ header h1 {
 }
 
 .input-group {
-    display: grid;
-    grid-template-columns: 2fr 1.5fr 1.5fr 1fr;
-    gap: 1rem;
+    display: flex;
+    gap: 0.8rem;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 640px) {
     .input-group {
-        grid-template-columns: 1fr;
+        flex-direction: column;
     }
 }
 
 input {
+    flex: 1;
     background: #0f172a;
     border: 1px solid #334155;
     color: #fff;
-    padding: 0.8rem 1rem;
-    border-radius: 0.5rem;
+    padding: 1rem 1.2rem;
+    border-radius: 0.6rem;
     outline: none;
-    font-size: 0.95rem;
+    font-size: 1.05rem;
     transition: all 0.2s;
 }
 
 input:focus {
     border-color: #38bdf8;
-    box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2);
+    box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.2);
 }
 
 button {
-    background: #0284c7;
+    background: linear-gradient(90deg, #0284c7, #2563eb);
     color: white;
     border: none;
-    padding: 0.8rem 1.2rem;
-    border-radius: 0.5rem;
+    padding: 1rem 1.8rem;
+    border-radius: 0.6rem;
     font-weight: 600;
+    font-size: 1rem;
     cursor: pointer;
     transition: all 0.2s;
+    white-space: nowrap;
 }
 
 button:hover {
-    background: #0369a1;
+    background: linear-gradient(90deg, #0369a1, #1d4ed8);
+    transform: translateY(-1px);
 }
 
 .actions-bar {

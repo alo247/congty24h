@@ -1,8 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
     const searchForm = document.getElementById('searchForm');
-    const taxInput = document.getElementById('taxInput');
-    const locationInput = document.getElementById('locationInput');
-    const businessInput = document.getElementById('businessInput');
+    const queryInput = document.getElementById('queryInput');
     const resultsBody = document.getElementById('resultsBody');
     const statusCount = document.getElementById('statusCount');
     const btnExport = document.getElementById('btnExport');
@@ -14,15 +12,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let currentCompanies = [];
 
-    async function loadCompanies(query = '', location = '', business = '') {
-        resultsBody.innerHTML = '<tr><td colspan="6" class="empty">⏳ Đang tra cứu & cào dữ liệu...</td></tr>';
+    async function loadCompanies(rawQuery = '') {
+        const cleanQuery = rawQuery.trim();
+        if (!cleanQuery) return;
+
+        resultsBody.innerHTML = '<tr><td colspan="6" class="empty">⏳ Đang tra cứu & cào dữ liệu tươi...</td></tr>';
         
         try {
             let res;
-            const cleanQuery = query.trim();
 
-            if (cleanQuery && /^\d{10}(-\d{3})?$/.test(cleanQuery)) {
-                // Tra cứu theo Mã Số Thuế
+            // Nếu người dùng nhập dạng Mã số thuế (10-13 chữ số)
+            if (/^\d{10}(-\d{3})?$/.test(cleanQuery)) {
                 res = await fetch(`/api/company/${encodeURIComponent(cleanQuery)}`);
                 const data = await res.json();
                 if (data.success) {
@@ -34,8 +34,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     statusCount.textContent = 'Không tìm thấy kết quả.';
                 }
             } else {
-                // Tra cứu danh sách theo Từ khóa / Ngành nghề / Địa điểm
-                const params = new URLSearchParams({ query: cleanQuery, location, business });
+                // Tra cứu tổng hợp theo Tên công ty / Địa chỉ / Ngành nghề qua 1 ô duy nhất
+                const params = new URLSearchParams({ query: cleanQuery });
                 res = await fetch(`/api/companies/search?${params.toString()}`);
                 const data = await res.json();
                 currentCompanies = data.data || [];
@@ -48,7 +48,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderTable(companies, fromCache = true) {
         if (!companies || companies.length === 0) {
-            resultsBody.innerHTML = '<tr><td colspan="6" class="empty">Chưa có dữ liệu. Vui lòng nhập Mã số thuế hoặc Từ khóa để tìm kiếm.</td></tr>';
+            resultsBody.innerHTML = '<tr><td colspan="6" class="empty">Không tìm thấy dữ liệu. Vui lòng thử từ khóa khác.</td></tr>';
             statusCount.textContent = 'Tổng số: 0 công ty';
             return;
         }
@@ -69,7 +69,7 @@ document.addEventListener('DOMContentLoaded', () => {
             </tr>
         `).join('');
 
-        // Thêm sự kiện click để mở modal xem chi tiết
+        // Thêm sự kiện click dòng để xem chi tiết
         document.querySelectorAll('#resultsBody tr').forEach(row => {
             row.addEventListener('click', () => {
                 const index = row.getAttribute('data-index');
@@ -119,16 +119,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     searchForm.addEventListener('submit', (e) => {
         e.preventDefault();
-        loadCompanies(taxInput.value, locationInput.value, businessInput.value);
+        loadCompanies(queryInput.value);
     });
 
     btnExport.addEventListener('click', () => {
-        const query = taxInput.value;
-        const location = locationInput.value;
-        const business = businessInput.value;
-        const params = new URLSearchParams({ query, location, business });
+        const query = queryInput.value.trim();
+        const params = new URLSearchParams({ query });
         window.location.href = `/api/export/csv?${params.toString()}`;
     });
 
-    loadCompanies();
+    // Mặc định load thử nghiệm ban đầu
+    loadCompanies('hoang ninh group');
 });
