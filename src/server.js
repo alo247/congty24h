@@ -1,10 +1,10 @@
 // src/server.js
-// Máy chủ Express Backend phục vụ API tra cứu mã số thuế và xuất file CSV (Đã tối ưu cho Vercel)
+// Máy chủ Express Backend phục vụ API tra cứu mã số thuế và xuất file CSV (Đã tối ưu cho Vercel & Tự động cào danh sách)
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const { findCompanyByTaxCode, searchCompanies, saveCompany } = require('./database');
-const { scrapeCompanyDetail } = require('./scraper');
+const { scrapeCompanyDetail, scrapeSearchList } = require('./scraper');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -42,11 +42,41 @@ app.get('/api/company/:taxCode', async (req, res) => {
     }
 });
 
-// API Tra cứu danh sách theo Từ khóa / Địa điểm / Ngành nghề
-app.get('/api/companies/search', (req, res) => {
+// API Tra cứu danh sách theo Từ khóa / Địa điểm / Ngành nghề (Tự động cào dữ liệu tươi nếu CSDL chưa có)
+app.get('/api/companies/search', async (req, res) => {
     try {
         const { query, location, business } = req.query;
-        const results = searchCompanies({ taxCodeOrName: query, location, business });
+        let results = searchCompanies({ taxCodeOrName: query, location, business });
+
+        const searchKeyword = [query, location, business].filter(Boolean).join(' ').trim();
+
+        // Nếu CSDL SQLite chưa có dữ liệu hoặc kết quả ít (< 3) -> Tự động cào danh sách mới từ masothue.com
+        if (searchKeyword && results.length < 3) {
+            console.log(`[Auto Scrape List] Đang tự động cào masothue.com cho từ khóa: "${searchKeyword}"`);
+            const msts = await scrapeSearchList(searchKeyword);
+
+            if (msts.length > 0) {
+                // Lấy tối đa 10 MST để cào chi tiết và nạp vào CSDL
+                const mstsToScrape = msts.slice(0, 10);
+                for (const mst of mstsToScrape) {
+                    if (!findCompanyByTaxCode(mst)) {
+                        console.log(`[Auto Scrape Detail] Cào chi tiết MST: ${mst}`);
+                        const detail = await scrapeCompanyDetail(mst);
+                        if (detail && detail.name) {
+                            saveCompany(detail);
+                        }
+                    }
+                }
+
+                // Query lại CSDL SQLite sau khi đã nạp dữ liệu tươi
+                results = searchCompanies({ taxCodeOrName: query, location, business });
+                if (results.length === 0) {
+                    // Trả về danh sách vừa cào nếu câu query SQL quá khắt khe
+                    results = mstsToScrape.map(mst => findCompanyByTaxCode(mst)).filter(Boolean);
+                }
+            }
+        }
+
         res.json({ success: true, count: results.length, data: results });
     } catch (error) {
         console.error('[Search API Error]', error);

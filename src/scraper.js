@@ -70,6 +70,35 @@ async function scrapeCompanyDetail(taxCode) {
     }
 }
 
+/**
+ * Cào danh sách các Mã số thuế từ trang tìm kiếm danh sách trên masothue.com
+ * @param {string} keyword Từ khóa tìm kiếm (Ví dụ: "chăn nuôi bắc ninh")
+ * @returns {Array<string>} Danh sách mã số thuế lấy được
+ */
+async function scrapeSearchList(keyword) {
+    try {
+        const url = `https://masothue.com/Search/?q=${encodeURIComponent(keyword)}`;
+        const response = await axios.get(url, { headers: HEADERS, timeout: 10000 });
+        const $ = cheerio.load(response.data);
+
+        const foundMsts = new Set();
+
+        $('a').each((i, el) => {
+            const href = $(el).attr('href') || '';
+            const match = href.match(/\/(\d{10}(-\d{3})?)/);
+            if (match && match[1]) {
+                foundMsts.add(match[1]);
+            }
+        });
+
+        return Array.from(foundMsts);
+    } catch (error) {
+        console.error(`[Scraper Error] Lỗi cào trang danh sách cho từ khóa "${keyword}":`, error.message);
+        return [];
+    }
+}
+
 module.exports = {
-    scrapeCompanyDetail
+    scrapeCompanyDetail,
+    scrapeSearchList
 };
