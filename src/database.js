@@ -1,5 +1,5 @@
 // src/database.js
-// Quản lý CSDL SQLite - Hỗ trợ Tìm kiếm Không Dấu (Accent-Insensitive Search)
+// Quản lý CSDL SQLite - Tích hợp tự động Link nguồn Thư Viện Pháp Luật (thuvienphapluat.vn)
 const Database = require('better-sqlite3');
 const path = require('path');
 
@@ -10,7 +10,7 @@ const dbPath = path.join(dbDir, 'database.db');
 const db = new Database(dbPath);
 
 /**
- * Loại bỏ dấu tiếng Việt để phục vụ tìm kiếm không dấu
+ * Loại bỏ dấu tiếng Việt để phục vụ tìm kiếm không dấu và tạo slug URL
  */
 function removeVietnameseTones(str) {
     if (!str) return '';
@@ -29,6 +29,17 @@ function removeVietnameseTones(str) {
     str = str.replace(/Ỳ|Ý|Ỵ|Ỷ|Ỹ/g, "y");
     str = str.replace(/Đ/g, "d");
     return str.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Tự động tạo URL trang công ty trên thuvienphapluat.vn
+ * Ví dụ: https://thuvienphapluat.vn/ma-so-thue/cong-ty-cp-hoang-ninh-group-mst-2400360346.html
+ */
+function generateTvplUrl(taxCode, name) {
+    if (!taxCode) return '';
+    const cleanName = name || 'doanh-nghiep';
+    const slug = removeVietnameseTones(cleanName).replace(/\s+/g, '-');
+    return `https://thuvienphapluat.vn/ma-so-thue/${slug}-mst-${taxCode}.html`;
 }
 
 /**
@@ -67,6 +78,7 @@ db.exec(`
         status TEXT,
         main_business TEXT,
         last_updated_at TEXT,
+        tvpl_url TEXT,
         search_text TEXT,
         raw_html TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -78,9 +90,10 @@ db.exec(`
 try { db.exec('ALTER TABLE companies ADD COLUMN tax_address TEXT;'); } catch(e){}
 try { db.exec('ALTER TABLE companies ADD COLUMN company_type TEXT;'); } catch(e){}
 try { db.exec('ALTER TABLE companies ADD COLUMN last_updated_at TEXT;'); } catch(e){}
+try { db.exec('ALTER TABLE companies ADD COLUMN tvpl_url TEXT;'); } catch(e){}
 try { db.exec('ALTER TABLE companies ADD COLUMN search_text TEXT;'); } catch(e){}
 
-// Tạo chỉ mục INDEX sau khi các cột đã tồn tại
+// Tạo chỉ mục INDEX
 db.exec(`
     CREATE INDEX IF NOT EXISTS idx_tax_code ON companies(tax_code);
     CREATE INDEX IF NOT EXISTS idx_main_business ON companies(main_business);
@@ -120,16 +133,17 @@ function searchCompanies({ taxCodeOrName, location, business }) {
 
 function saveCompany(companyData) {
     const searchText = generateSearchText(companyData);
+    const tvplUrl = companyData.tvpl_url || generateTvplUrl(companyData.tax_code, companyData.name);
 
     const stmt = db.prepare(`
         INSERT INTO companies (
             tax_code, name, international_name, short_name,
             representative, address, tax_address, phone, license_date,
-            managed_by, company_type, status, main_business, last_updated_at, search_text, raw_html
+            managed_by, company_type, status, main_business, last_updated_at, tvpl_url, search_text, raw_html
         ) VALUES (
             @tax_code, @name, @international_name, @short_name,
             @representative, @address, @tax_address, @phone, @license_date,
-            @managed_by, @company_type, @status, @main_business, @last_updated_at, @search_text, @raw_html
+            @managed_by, @company_type, @status, @main_business, @last_updated_at, @tvpl_url, @search_text, @raw_html
         )
         ON CONFLICT(tax_code) DO UPDATE SET
             name=excluded.name,
@@ -145,6 +159,7 @@ function saveCompany(companyData) {
             status=excluded.status,
             main_business=excluded.main_business,
             last_updated_at=excluded.last_updated_at,
+            tvpl_url=excluded.tvpl_url,
             search_text=excluded.search_text,
             updated_at=CURRENT_TIMESTAMP
     `);
@@ -155,6 +170,7 @@ function saveCompany(companyData) {
         last_updated_at: '',
         raw_html: '',
         ...companyData,
+        tvpl_url: tvplUrl,
         search_text: searchText
     });
 }
@@ -164,5 +180,6 @@ module.exports = {
     findCompanyByTaxCode,
     searchCompanies,
     saveCompany,
-    removeVietnameseTones
+    removeVietnameseTones,
+    generateTvplUrl
 };

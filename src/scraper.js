@@ -1,5 +1,5 @@
 // src/scraper.js
-// Module cào & trích xuất ĐẦY ĐỦ 14 trường thông tin chi tiết của doanh nghiệp
+// Module cào & trích xuất ĐẦY ĐỦ thông tin chi tiết từ VietQR API + Masothue Engine + Tự động liên kết Thư Viện Pháp Luật
 const axios = require('axios');
 const cheerio = require('cheerio');
 
@@ -11,51 +11,82 @@ const ENHANCED_HEADERS = {
     'Referer': 'https://masothue.com/'
 };
 
-/**
- * Làm sạch chuỗi người đại diện (Loại bỏ danh sách doanh nghiệp liên quan phía sau)
- */
+function removeTones(str) {
+    if (!str) return '';
+    return str.toLowerCase()
+        .replace(/à|á|ạ|ả|ã|â|ầ|ấ|ậ|ẩ|ẫ|ă|ằ|ắ|ặ|ẳ|ẵ/g, "a")
+        .replace(/è|é|ẹ|ẻ|ẽ|ê|ề|ế|ệ|ể|ễ/g, "e")
+        .replace(/ì|í|ị|ỉ|ĩ/g, "i")
+        .replace(/ò|ó|ọ|ỏ|õ|ô|ồ|ố|ộ|ổ|ỗ|ơ|ờ|ớ|ợ|ở|ỡ/g, "o")
+        .replace(/ù|ú|ụ|ủ|ũ|ư|ừ|ứ|ự|ử|ữ/g, "u")
+        .replace(/ỳ|ý|ỵ|ỷ|ỹ/g, "y")
+        .replace(/đ/g, "d")
+        .replace(/[^a-z0-9 ]/g, '')
+        .replace(/\s+/g, '-')
+        .trim();
+}
+
+function buildTvplUrl(taxCode, name) {
+    const slug = removeTones(name || 'cong-ty');
+    return `https://thuvienphapluat.vn/ma-so-thue/${slug}-mst-${taxCode}.html`;
+}
+
 function cleanRepresentative(rawText) {
     if (!rawText) return '';
     return rawText.split('Ngoài ra')[0].split('đại diện các')[0].trim();
 }
 
-/**
- * Làm sạch chuỗi số điện thoại (Loại bỏ chữ 'Ẩn số điện thoại')
- */
 function cleanPhone(rawText) {
     if (!rawText) return '';
     return rawText.replace(/Ẩn số điện thoại/gi, '').trim();
 }
 
 /**
- * Cào / Trích xuất chi tiết ĐẦY ĐỦ 14 trường thông tin công ty từ masothue.com và VietQR API
+ * Cào / Trích xuất chi tiết thông tin công ty bằng cơ chế Đa Nguồn (VietQR API + Masothue Engine + Thư Viện Pháp Luật)
  * @param {string} taxCode 
  * @returns {object|null}
  */
 async function scrapeCompanyDetail(taxCode) {
     const cleanTaxCode = taxCode.trim();
 
-    // 1. Thử cào trực tiếp từ masothue.com (Truy cập thẳng trang chi tiết hoặc tìm kiếm)
+    // 1. Thử VietQR Business API (Siêu tốc & Không bị WAF/Cloudflare 403 trên Vercel)
     try {
-        const searchUrl = `https://masothue.com/Search/?q=${encodeURIComponent(cleanTaxCode)}`;
-        const searchRes = await axios.get(searchUrl, { headers: ENHANCED_HEADERS, timeout: 8000 });
-        const $search = cheerio.load(searchRes.data);
+        const vietQrUrl = `https://api.vietqr.io/v2/business/${encodeURIComponent(cleanTaxCode)}`;
+        const vres = await axios.get(vietQrUrl, { timeout: 6000 });
+        if (vres.data && vres.data.code === '00' && vres.data.data && vres.data.data.name) {
+            const vdata = vres.data.data;
+            return {
+                tax_code: cleanTaxCode,
+                name: vdata.name,
+                international_name: vdata.internationalName || '',
+                short_name: vdata.shortName || '',
+                representative: vdata.representative || '',
+                address: vdata.address || '',
+                tax_address: vdata.address || '',
+                phone: vdata.phone || '',
+                license_date: vdata.createdDate || '',
+                managed_by: vdata.managedBy || '',
+                company_type: vdata.companyType || 'Doanh nghiệp',
+                status: vdata.status || 'Đang hoạt động',
+                main_business: vdata.mainBusiness || '',
+                last_updated_at: new Date().toISOString().split('T')[0],
+                tvpl_url: buildTvplUrl(cleanTaxCode, vdata.name),
+                raw_html: JSON.stringify(vdata)
+            };
+        }
+    } catch (e) {
+        console.log(`[VietQR API Miss] ${cleanTaxCode}:`, e.message);
+    }
 
-        // Tìm link chi tiết dạng /<taxCode>-slug nếu có
-        let detailUrl = searchUrl;
-        $search('a').each((i, el) => {
-            const href = $search(el).attr('href') || '';
-            if (href.includes(`/${cleanTaxCode}-`)) {
-                detailUrl = `https://masothue.com${href}`;
-            }
-        });
-
-        const detailRes = detailUrl === searchUrl ? searchRes : await axios.get(detailUrl, { headers: ENHANCED_HEADERS, timeout: 8000 });
-        const $ = cheerio.load(detailRes.data);
+    // 2. Fallback: Cào từ masothue.com nếu VietQR không tìm thấy
+    try {
+        const url = `https://masothue.com/Search/?q=${encodeURIComponent(cleanTaxCode)}&type=auto`;
+        const response = await axios.get(url, { headers: ENHANCED_HEADERS, timeout: 10000 });
+        const $ = cheerio.load(response.data);
 
         const company = {
             tax_code: cleanTaxCode,
-            name: $('th[span="2"]').text().trim() || $('table.table-taxinfo thead th').text().trim() || $('h1').first().text().trim(),
+            name: '',
             international_name: '',
             short_name: '',
             representative: '',
@@ -68,8 +99,13 @@ async function scrapeCompanyDetail(taxCode) {
             status: 'Đang hoạt động',
             main_business: '',
             last_updated_at: '',
-            raw_html: detailRes.data
+            tvpl_url: '',
+            raw_html: response.data
         };
+
+        company.name = $('th[span="2"]').text().trim() 
+                    || $('table.table-taxinfo thead th').text().trim() 
+                    || $('h1').first().text().trim();
 
         $('table.table-taxinfo tbody tr').each((i, el) => {
             const label = $(el).find('td').eq(0).text().trim();
@@ -93,47 +129,19 @@ async function scrapeCompanyDetail(taxCode) {
             if (label.includes('Cập nhật mã số thuế')) company.last_updated_at = label + ' ' + value;
         });
 
-        // Đảm bảo tên hợp lệ và đúng MST
-        if (company.name && !company.name.includes('Không tìm thấy') && company.tax_code === cleanTaxCode) {
+        if (company.name && !company.name.includes('Không tìm thấy')) {
+            company.tvpl_url = buildTvplUrl(company.tax_code, company.name);
             return company;
         }
     } catch (error) {
-        console.log(`[Masothue Scraper Fallback] ${cleanTaxCode}:`, error.message);
-    }
-
-    // 2. Thử VietQR Business API nếu masothue.com bị chặn hoặc thiếu
-    try {
-        const vietQrUrl = `https://api.vietqr.io/v2/business/${encodeURIComponent(cleanTaxCode)}`;
-        const vres = await axios.get(vietQrUrl, { timeout: 6000 });
-        if (vres.data && vres.data.code === '00' && vres.data.data && vres.data.data.name) {
-            const vdata = vres.data.data;
-            return {
-                tax_code: cleanTaxCode,
-                name: vdata.name,
-                international_name: vdata.internationalName || '',
-                short_name: vdata.shortName || '',
-                representative: vdata.representative || '',
-                address: vdata.address || '',
-                tax_address: vdata.address || '',
-                phone: vdata.phone || '',
-                license_date: vdata.createdDate || '',
-                managed_by: vdata.managedBy || '',
-                company_type: vdata.companyType || 'Doanh nghiệp',
-                status: vdata.status || 'Đang hoạt động',
-                main_business: vdata.mainBusiness || '',
-                last_updated_at: new Date().toISOString().split('T')[0],
-                raw_html: JSON.stringify(vdata)
-            };
-        }
-    } catch (e) {
-        console.log(`[VietQR API Miss] ${cleanTaxCode}:`, e.message);
+        console.error(`[Masothue Scraper Error] Lỗi cào dữ liệu cho MST ${cleanTaxCode}:`, error.message);
     }
 
     return null;
 }
 
 /**
- * Cào danh sách các Mã số thuế từ trang tìm kiếm danh sách trên masothue.com
+ * Cào danh sách các Mã số thuế từ trang tìm kiếm
  * @param {string} keyword 
  * @returns {Array<string>} Danh sách mã số thuế lấy được
  */
@@ -162,5 +170,6 @@ async function scrapeSearchList(keyword) {
 
 module.exports = {
     scrapeCompanyDetail,
-    scrapeSearchList
+    scrapeSearchList,
+    buildTvplUrl
 };

@@ -15,7 +15,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentCompanies = [];
 
     async function loadCompanies(query = '', location = '', business = '') {
-        resultsBody.innerHTML = '<tr><td colspan="6" class="empty">⏳ Đang tra cứu & cào dữ liệu từ masothue.com...</td></tr>';
+        resultsBody.innerHTML = '<tr><td colspan="6" class="empty">⏳ Đang tra cứu & cào dữ liệu...</td></tr>';
         
         try {
             let res;
@@ -69,7 +69,7 @@ document.addEventListener('DOMContentLoaded', () => {
             </tr>
         `).join('');
 
-        // Bấm vào dòng để mở xem chi tiết đầy đủ 14 trường thông tin
+        // Thêm sự kiện click để mở modal xem chi tiết
         document.querySelectorAll('#resultsBody tr').forEach(row => {
             row.addEventListener('click', () => {
                 const index = row.getAttribute('data-index');
@@ -95,7 +95,14 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="detail-item"><label>Quản lý bởi (Chi cục Thuế)</label><span>${c.managed_by || '-'}</span></div>
             <div class="detail-item"><label>Loại hình doanh nghiệp</label><span>${c.company_type || '-'}</span></div>
             <div class="detail-item"><label>Ngành nghề kinh doanh chính</label><span>${c.main_business || '-'}</span></div>
-            <div class="detail-item"><label>Cập nhật lần cuối</label><span>${c.last_updated_at || '-'}</span></div>
+            <div class="detail-item">
+                <label>Nguồn trang Thư Viện Pháp Luật</label>
+                <span>
+                    <a href="${c.tvpl_url}" target="_blank" rel="noopener noreferrer" style="color: #38bdf8; text-decoration: underline; font-weight: 600;">
+                        🔗 Xem bài viết công ty trên Thư Viện Pháp Luật
+                    </a>
+                </span>
+            </div>
         `;
         detailModal.style.display = 'flex';
     }

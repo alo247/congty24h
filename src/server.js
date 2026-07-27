@@ -1,9 +1,9 @@
 // src/server.js
-// Máy chủ Express Backend phục vụ API tra cứu mã số thuế và xuất file CSV (Đã tối ưu hoàn hảo cho Vercel & Tự động cào danh sách)
+// Máy chủ Express Backend phục vụ API tra cứu mã số thuế và xuất file CSV (Bổ sung Link Thư Viện Pháp Luật)
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const { findCompanyByTaxCode, searchCompanies, saveCompany } = require('./database');
+const { findCompanyByTaxCode, searchCompanies, saveCompany, generateTvplUrl } = require('./database');
 const { scrapeCompanyDetail, scrapeSearchList } = require('./scraper');
 
 const app = express();
@@ -22,6 +22,9 @@ app.get('/api/company/:taxCode', async (req, res) => {
         // 1. Kiểm tra CSDL trước (Cache Hit)
         let company = findCompanyByTaxCode(cleanTaxCode);
         if (company) {
+            if (!company.tvpl_url) {
+                company.tvpl_url = generateTvplUrl(company.tax_code, company.name);
+            }
             return res.json({ success: true, from_cache: true, data: company });
         }
 
@@ -42,7 +45,7 @@ app.get('/api/company/:taxCode', async (req, res) => {
     }
 });
 
-// API Tra cứu danh sách theo Từ khóa / Địa điểm / Ngành nghề (Tự động cào dữ liệu tươi nếu CSDL chưa có)
+// API Tra cứu danh sách theo Từ khóa / Địa điểm / Ngành nghề
 app.get('/api/companies/search', async (req, res) => {
     try {
         const { query, location, business } = req.query;
@@ -70,19 +73,25 @@ app.get('/api/companies/search', async (req, res) => {
                         }
                     }
                     if (detail && detail.name) {
+                        if (!detail.tvpl_url) {
+                            detail.tvpl_url = generateTvplUrl(detail.tax_code, detail.name);
+                        }
                         freshlyScraped.push(detail);
                     }
                 }
 
-                // Query lại CSDL SQLite
                 results = searchCompanies({ taxCodeOrName: query, location, business });
-
-                // Phục hồi trả về toàn bộ công ty vừa cào/tìm thấy nếu bộ lọc SQL cũ quá khắt khe
                 if (results.length === 0 && freshlyScraped.length > 0) {
                     results = freshlyScraped;
                 }
             }
         }
+
+        // Bổ sung tvpl_url cho tất cả bản ghi trả về
+        results = results.map(c => ({
+            ...c,
+            tvpl_url: c.tvpl_url || generateTvplUrl(c.tax_code, c.name)
+        }));
 
         res.json({ success: true, count: results.length, data: results });
     } catch (error) {
@@ -91,16 +100,17 @@ app.get('/api/companies/search', async (req, res) => {
     }
 });
 
-// API Xuất file CSV (Đầy đủ 14 trường thông tin chi tiết)
+// API Xuất file CSV (Đầy đủ trường thông tin & Link Thư Viện Pháp Luật)
 app.get('/api/export/csv', (req, res) => {
     try {
         const { query, location, business } = req.query;
-        const companies = searchCompanies({ taxCodeOrName: query, location, business });
+        let companies = searchCompanies({ taxCodeOrName: query, location, business });
 
         let csv = '\uFEFF';
-        csv += 'Mã Số Thuế,Tên Công Ty,Tên Quốc Tế,Tên Viết Tắt,Người Đại Diện,Địa Chỉ Trụ Sở,Địa Chỉ Thuế,Điện Thoại,Trạng Thái,Loại Hình DN,Chi Cục Thuế Quản Lý,Ngành Nghề Chính,Ngày Cấp\n';
+        csv += 'Mã Số Thuế,Tên Công Ty,Tên Quốc Tế,Tên Viết Tắt,Người Đại Diện,Địa Chỉ Trụ Sở,Địa Chỉ Thuế,Điện Thoại,Trạng Thái,Loại Hình DN,Chi Cục Thuế Quản Lý,Ngành Nghề Chính,Ngày Cấp,Link Thư Viện Pháp Luật\n';
 
         companies.forEach(c => {
+            const tvplUrl = c.tvpl_url || generateTvplUrl(c.tax_code, c.name);
             const row = [
                 `"${c.tax_code || ''}"`,
                 `"${(c.name || '').replace(/"/g, '""')}"`,
@@ -114,13 +124,14 @@ app.get('/api/export/csv', (req, res) => {
                 `"${(c.company_type || '').replace(/"/g, '""')}"`,
                 `"${(c.managed_by || '').replace(/"/g, '""')}"`,
                 `"${(c.main_business || '').replace(/"/g, '""')}"`,
-                `"${c.license_date || ''}"`
+                `"${c.license_date || ''}"`,
+                `"${tvplUrl}"`
             ];
             csv += row.join(',') + '\n';
         });
 
         res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-        res.setHeader('Content-Disposition', 'attachment; filename=danh_sach_cong_ty_chi_tiet.csv');
+        res.setHeader('Content-Disposition', 'attachment; filename=danh_sach_cong_ty_tvpl.csv');
         res.send(csv);
     } catch (error) {
         console.error('[Export CSV Error]', error);
