@@ -1,5 +1,5 @@
 // src/database.js
-// Quản lý CSDL SQLite - Tự động Seed CSDL trên Vercel & Tìm kiếm Không Dấu Đa Từ (Multi-Word Accent-Insensitive Search)
+// Quản lý CSDL SQLite - Tự động Seed CSDL trên Vercel & Tìm kiếm Đa Từ Không Dấu Quy Mô Cực Lớn (Up to 2,000+ companies)
 const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
@@ -112,7 +112,7 @@ function findCompanyByTaxCode(taxCode) {
 }
 
 /**
- * Tra cứu CSDL SQLite với thuật toán lọc đa từ không dấu (Multi-Word Unaccented Search)
+ * Tra cứu CSDL SQLite Quy Mô Lớn (lên đến 2,000 công ty / tìm kiếm)
  */
 function searchCompanies({ taxCodeOrName, location, business }) {
     let sql = 'SELECT * FROM companies WHERE 1=1';
@@ -139,7 +139,7 @@ function searchCompanies({ taxCodeOrName, location, business }) {
         applyWordFilter(business);
     }
 
-    sql += ' ORDER BY id DESC LIMIT 100';
+    sql += ' ORDER BY id DESC LIMIT 2000';
     const stmt = db.prepare(sql);
     return stmt.all(...params);
 }
