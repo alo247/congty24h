@@ -1,16 +1,30 @@
 // src/database.js
-// Quản lý CSDL SQLite - Tích hợp tự động Link nguồn Thư Viện Pháp Luật (thuvienphapluat.vn)
+// Quản lý CSDL SQLite - Tự động Seed CSDL trên Vercel & Tìm kiếm Không Dấu Đa Từ (Multi-Word Accent-Insensitive Search)
 const Database = require('better-sqlite3');
 const path = require('path');
+const fs = require('fs');
 
 const isVercel = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+const rootDbPath = path.join(__dirname, '..', 'database.db');
 const dbDir = isVercel ? '/tmp' : path.join(__dirname, '..');
 const dbPath = path.join(dbDir, 'database.db');
+
+// Nếu trên Vercel Serverless, tự động copy file CSDL đã bundle từ gốc vào /tmp trên Cold Start
+if (isVercel) {
+    try {
+        if (!fs.existsSync(dbPath) && fs.existsSync(rootDbPath)) {
+            fs.copyFileSync(rootDbPath, dbPath);
+            console.log('[Vercel Seed] Đã copy CSDL database.db từ root vào /tmp/database.db thành công!');
+        }
+    } catch (err) {
+        console.error('[Vercel Seed Error]', err.message);
+    }
+}
 
 const db = new Database(dbPath);
 
 /**
- * Loại bỏ dấu tiếng Việt để phục vụ tìm kiếm không dấu và tạo slug URL
+ * Loại bỏ dấu tiếng Việt để phục vụ tìm kiếm không dấu
  */
 function removeVietnameseTones(str) {
     if (!str) return '';
@@ -31,10 +45,6 @@ function removeVietnameseTones(str) {
     return str.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-/**
- * Tự động tạo URL trang công ty trên thuvienphapluat.vn
- * Ví dụ: https://thuvienphapluat.vn/ma-so-thue/cong-ty-cp-hoang-ninh-group-mst-2400360346.html
- */
 function generateTvplUrl(taxCode, name) {
     if (!taxCode) return '';
     const cleanName = name || 'doanh-nghiep';
@@ -42,9 +52,6 @@ function generateTvplUrl(taxCode, name) {
     return `https://thuvienphapluat.vn/ma-so-thue/${slug}-mst-${taxCode}.html`;
 }
 
-/**
- * Tạo văn bản tìm kiếm tổng hợp (Gồm cả có dấu & không dấu)
- */
 function generateSearchText(c) {
     const raw = [
         c.tax_code,
@@ -60,7 +67,7 @@ function generateSearchText(c) {
     return (raw + ' ' + removeVietnameseTones(raw)).toLowerCase();
 }
 
-// Tự động khởi tạo bảng
+// Khởi tạo bảng
 db.exec(`
     CREATE TABLE IF NOT EXISTS companies (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -86,14 +93,12 @@ db.exec(`
     );
 `);
 
-// Tự động mở rộng cột cho CSDL cũ nếu chưa có
 try { db.exec('ALTER TABLE companies ADD COLUMN tax_address TEXT;'); } catch(e){}
 try { db.exec('ALTER TABLE companies ADD COLUMN company_type TEXT;'); } catch(e){}
 try { db.exec('ALTER TABLE companies ADD COLUMN last_updated_at TEXT;'); } catch(e){}
 try { db.exec('ALTER TABLE companies ADD COLUMN tvpl_url TEXT;'); } catch(e){}
 try { db.exec('ALTER TABLE companies ADD COLUMN search_text TEXT;'); } catch(e){}
 
-// Tạo chỉ mục INDEX
 db.exec(`
     CREATE INDEX IF NOT EXISTS idx_tax_code ON companies(tax_code);
     CREATE INDEX IF NOT EXISTS idx_main_business ON companies(main_business);
@@ -106,24 +111,32 @@ function findCompanyByTaxCode(taxCode) {
     return stmt.get(taxCode);
 }
 
+/**
+ * Tra cứu CSDL SQLite với thuật toán lọc đa từ không dấu (Multi-Word Unaccented Search)
+ */
 function searchCompanies({ taxCodeOrName, location, business }) {
     let sql = 'SELECT * FROM companies WHERE 1=1';
     const params = [];
 
+    const applyWordFilter = (inputStr) => {
+        if (!inputStr) return;
+        const norm = removeVietnameseTones(inputStr);
+        const words = norm.split(' ').filter(w => w.length > 0);
+
+        words.forEach(word => {
+            sql += ' AND (tax_code LIKE ? OR name LIKE ? OR search_text LIKE ?)';
+            params.push(`%${word}%`, `%${word}%`, `%${word}%`);
+        });
+    };
+
     if (taxCodeOrName) {
-        const cleanNorm = removeVietnameseTones(taxCodeOrName);
-        sql += ' AND (tax_code LIKE ? OR name LIKE ? OR search_text LIKE ?)';
-        params.push(`%${taxCodeOrName}%`, `%${taxCodeOrName}%`, `%${cleanNorm}%`);
+        applyWordFilter(taxCodeOrName);
     }
     if (location) {
-        const cleanLoc = removeVietnameseTones(location);
-        sql += ' AND (address LIKE ? OR tax_address LIKE ? OR search_text LIKE ?)';
-        params.push(`%${location}%`, `%${location}%`, `%${cleanLoc}%`);
+        applyWordFilter(location);
     }
     if (business) {
-        const cleanBiz = removeVietnameseTones(business);
-        sql += ' AND (main_business LIKE ? OR search_text LIKE ?)';
-        params.push(`%${business}%`, `%${cleanBiz}%`);
+        applyWordFilter(business);
     }
 
     sql += ' ORDER BY id DESC LIMIT 100';
