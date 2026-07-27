@@ -1,5 +1,5 @@
 // src/server.js
-// Máy chủ Express Backend phục vụ API tra cứu mã số thuế và xuất file CSV (Hỗ trợ 14 trường thông tin chi tiết)
+// Máy chủ Express Backend phục vụ API tra cứu mã số thuế và xuất file CSV (Đã tối ưu hoàn hảo cho Vercel & Tự động cào danh sách)
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -42,7 +42,7 @@ app.get('/api/company/:taxCode', async (req, res) => {
     }
 });
 
-// API Tra cứu danh sách theo Từ khóa / Địa điểm / Ngành nghề
+// API Tra cứu danh sách theo Từ khóa / Địa điểm / Ngành nghề (Tự động cào dữ liệu tươi nếu CSDL chưa có)
 app.get('/api/companies/search', async (req, res) => {
     try {
         const { query, location, business } = req.query;
@@ -50,26 +50,36 @@ app.get('/api/companies/search', async (req, res) => {
 
         const searchKeyword = [query, location, business].filter(Boolean).join(' ').trim();
 
-        // Nếu CSDL SQLite chưa có dữ liệu hoặc kết quả ít (< 3) -> Tự động cào danh sách mới từ masothue.com
+        // Nếu CSDL SQLite chưa có đủ dữ liệu -> Tự động cào danh sách mới
         if (searchKeyword && results.length < 3) {
-            console.log(`[Auto Scrape List] Đang tự động cào masothue.com cho từ khóa: "${searchKeyword}"`);
+            console.log(`[Auto Scrape List] Đang tự động cào cho từ khóa: "${searchKeyword}"`);
             const msts = await scrapeSearchList(searchKeyword);
 
             if (msts.length > 0) {
-                const mstsToScrape = msts.slice(0, 10);
+                const mstsToScrape = msts.slice(0, 15);
+                const freshlyScraped = [];
+
                 for (const mst of mstsToScrape) {
-                    if (!findCompanyByTaxCode(mst)) {
+                    let detail = findCompanyByTaxCode(mst);
+                    if (!detail) {
                         console.log(`[Auto Scrape Detail] Cào chi tiết MST: ${mst}`);
-                        const detail = await scrapeCompanyDetail(mst);
+                        detail = await scrapeCompanyDetail(mst);
                         if (detail && detail.name) {
                             saveCompany(detail);
+                            detail = findCompanyByTaxCode(mst) || detail;
                         }
+                    }
+                    if (detail && detail.name) {
+                        freshlyScraped.push(detail);
                     }
                 }
 
+                // Query lại CSDL SQLite
                 results = searchCompanies({ taxCodeOrName: query, location, business });
-                if (results.length === 0) {
-                    results = mstsToScrape.map(mst => findCompanyByTaxCode(mst)).filter(Boolean);
+
+                // Phục hồi trả về toàn bộ công ty vừa cào/tìm thấy nếu bộ lọc SQL cũ quá khắt khe
+                if (results.length === 0 && freshlyScraped.length > 0) {
+                    results = freshlyScraped;
                 }
             }
         }
