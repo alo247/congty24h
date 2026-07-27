@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hệ Thống Tra Cứu & Cào Dữ Liệu Mã Số Thuế</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🏢 Tra Cứu & Cào Dữ Liệu Mã Số Thuế</h1>
+            <p class="subtitle">Hệ thống Lazy-Caching Scraping - Tự động cào dữ liệu tươi & Lưu CSDL SQLite</p>
+        </header>
+
+        <section class="search-card">
+            <form id="searchForm">
+                <div class="input-group">
+                    <input type="text" id="taxInput" placeholder="Mã số thuế hoặc Tên công ty...">
+                    <input type="text" id="locationInput" placeholder="Địa điểm (Tỉnh/Thành, Quận)...">
+                    <input type="text" id="businessInput" placeholder="Ngành nghề kinh doanh...">
+                    <button type="submit" id="btnSearch">🔍 Tra cứu & Cào</button>
+                </div>
+            </form>
+        </section>
+
+        <section class="actions-bar">
+            <div class="status-info" id="statusCount">Đang tải danh sách công ty...</div>
+            <button id="btnExport" class="btn-export">📥 Xuất Excel / Google Sheets (CSV)</button>
+        </section>
+
+        <section class="results-section">
+            <div class="table-container">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>MST</th>
+                            <th>Tên Doanh Nghiệp</th>
+                            <th>Người Đại Diện</th>
+                            <th>Địa Chỉ</th>
+                            <th>Ngành Nghề</th>
+                            <th>Nguồn Dữ Liệu</th>
+                        </tr>
+                    </thead>
+                    <tbody id="resultsBody">
+                        <tr><td colspan="6" class="empty">Nhập từ khóa hoặc Mã số thuế để tra cứu</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+
+    <!-- Modal Chi tiết -->
+    <div id="detailModal" class="modal">
+        <div class="modal-content">
+            <span class="close-btn" id="closeModal">&times;</span>
+            <h2 id="modalTitle">Chi tiết Doanh nghiệp</h2>
+            <div id="modalBody" class="modal-body-content"></div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
