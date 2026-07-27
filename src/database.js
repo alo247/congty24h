@@ -1,5 +1,5 @@
 // src/database.js
-// Quản lý CSDL SQLite - Lưu trữ đầy đủ 14 trường thông tin chi tiết của doanh nghiệp
+// Quản lý CSDL SQLite - Hỗ trợ Tìm kiếm Không Dấu (Accent-Insensitive Search)
 const Database = require('better-sqlite3');
 const path = require('path');
 
@@ -9,7 +9,47 @@ const dbPath = path.join(dbDir, 'database.db');
 
 const db = new Database(dbPath);
 
-// Tự động khởi tạo bảng và chỉ mục
+/**
+ * Loại bỏ dấu tiếng Việt để phục vụ tìm kiếm không dấu
+ */
+function removeVietnameseTones(str) {
+    if (!str) return '';
+    str = str.replace(/à|á|ạ|ả|ã|â|ầ|ấ|ậ|ẩ|ẫ|ă|ằ|ắ|ặ|ẳ|ẵ/g, "a");
+    str = str.replace(/è|é|ẹ|ẻ|ẽ|ê|ề|ế|ệ|ể|ễ/g, "e");
+    str = str.replace(/ì|í|ị|ỉ|ĩ/g, "i");
+    str = str.replace(/ò|ó|ọ|ỏ|õ|ô|ồ|ố|ộ|ổ|ỗ|ơ|ờ|ớ|ợ|ở|ỡ/g, "o");
+    str = str.replace(/ù|ú|ụ|ủ|ũ|ư|ừ|ứ|ự|ử|ữ/g, "u");
+    str = str.replace(/ỳ|ý|ỵ|ỷ|ỹ/g, "y");
+    str = str.replace(/đ/g, "d");
+    str = str.replace(/À|Á|Ạ|Ả|Ã|Â|Ầ|Ấ|Ậ|Ẩ|Ẫ|Ă|Ằ|Ắ|Ặ|Ẳ|Ẵ/g, "a");
+    str = str.replace(/È|É|Ẹ|Ẻ|Ẽ|Ê|Ề|Ế|Ệ|Ể|Ễ/g, "e");
+    str = str.replace(/Ì|Í|Ị|Ỉ|Ĩ/g, "i");
+    str = str.replace(/Ò|Ó|Ọ|Ỏ|Õ|Ô|Ồ|Ố|Ộ|Ổ|Ỗ|Ơ|Ờ|Ớ|Ợ|Ở|Ỡ/g, "o");
+    str = str.replace(/Ù|Ú|Ụ|Ủ|Ũ|Ư|Ừ|Ứ|Ự|Ử|Ữ/g, "u");
+    str = str.replace(/Ỳ|Ý|Ỵ|Ỷ|Ỹ/g, "y");
+    str = str.replace(/Đ/g, "d");
+    return str.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Tạo văn bản tìm kiếm tổng hợp (Gồm cả có dấu & không dấu)
+ */
+function generateSearchText(c) {
+    const raw = [
+        c.tax_code,
+        c.name,
+        c.international_name,
+        c.short_name,
+        c.representative,
+        c.address,
+        c.tax_address,
+        c.main_business
+    ].filter(Boolean).join(' ');
+
+    return (raw + ' ' + removeVietnameseTones(raw)).toLowerCase();
+}
+
+// Tự động khởi tạo bảng
 db.exec(`
     CREATE TABLE IF NOT EXISTS companies (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -27,20 +67,26 @@ db.exec(`
         status TEXT,
         main_business TEXT,
         last_updated_at TEXT,
+        search_text TEXT,
         raw_html TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     );
-
-    CREATE INDEX IF NOT EXISTS idx_tax_code ON companies(tax_code);
-    CREATE INDEX IF NOT EXISTS idx_main_business ON companies(main_business);
-    CREATE INDEX IF NOT EXISTS idx_address ON companies(address);
 `);
 
-// Thêm cột tự động cho CSDL cũ nếu chưa có
+// Tự động mở rộng cột cho CSDL cũ nếu chưa có
 try { db.exec('ALTER TABLE companies ADD COLUMN tax_address TEXT;'); } catch(e){}
 try { db.exec('ALTER TABLE companies ADD COLUMN company_type TEXT;'); } catch(e){}
 try { db.exec('ALTER TABLE companies ADD COLUMN last_updated_at TEXT;'); } catch(e){}
+try { db.exec('ALTER TABLE companies ADD COLUMN search_text TEXT;'); } catch(e){}
+
+// Tạo chỉ mục INDEX sau khi các cột đã tồn tại
+db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_tax_code ON companies(tax_code);
+    CREATE INDEX IF NOT EXISTS idx_main_business ON companies(main_business);
+    CREATE INDEX IF NOT EXISTS idx_address ON companies(address);
+    CREATE INDEX IF NOT EXISTS idx_search_text ON companies(search_text);
+`);
 
 function findCompanyByTaxCode(taxCode) {
     const stmt = db.prepare('SELECT * FROM companies WHERE tax_code = ?');
@@ -52,16 +98,19 @@ function searchCompanies({ taxCodeOrName, location, business }) {
     const params = [];
 
     if (taxCodeOrName) {
-        sql += ' AND (tax_code LIKE ? OR name LIKE ? OR representative LIKE ?)';
-        params.push(`%${taxCodeOrName}%`, `%${taxCodeOrName}%`, `%${taxCodeOrName}%`);
+        const cleanNorm = removeVietnameseTones(taxCodeOrName);
+        sql += ' AND (tax_code LIKE ? OR name LIKE ? OR search_text LIKE ?)';
+        params.push(`%${taxCodeOrName}%`, `%${taxCodeOrName}%`, `%${cleanNorm}%`);
     }
     if (location) {
-        sql += ' AND (address LIKE ? OR tax_address LIKE ?)';
-        params.push(`%${location}%`, `%${location}%`);
+        const cleanLoc = removeVietnameseTones(location);
+        sql += ' AND (address LIKE ? OR tax_address LIKE ? OR search_text LIKE ?)';
+        params.push(`%${location}%`, `%${location}%`, `%${cleanLoc}%`);
     }
     if (business) {
-        sql += ' AND main_business LIKE ?';
-        params.push(`%${business}%`);
+        const cleanBiz = removeVietnameseTones(business);
+        sql += ' AND (main_business LIKE ? OR search_text LIKE ?)';
+        params.push(`%${business}%`, `%${cleanBiz}%`);
     }
 
     sql += ' ORDER BY id DESC LIMIT 100';
@@ -70,15 +119,17 @@ function searchCompanies({ taxCodeOrName, location, business }) {
 }
 
 function saveCompany(companyData) {
+    const searchText = generateSearchText(companyData);
+
     const stmt = db.prepare(`
         INSERT INTO companies (
             tax_code, name, international_name, short_name,
             representative, address, tax_address, phone, license_date,
-            managed_by, company_type, status, main_business, last_updated_at, raw_html
+            managed_by, company_type, status, main_business, last_updated_at, search_text, raw_html
         ) VALUES (
             @tax_code, @name, @international_name, @short_name,
             @representative, @address, @tax_address, @phone, @license_date,
-            @managed_by, @company_type, @status, @main_business, @last_updated_at, @raw_html
+            @managed_by, @company_type, @status, @main_business, @last_updated_at, @search_text, @raw_html
         )
         ON CONFLICT(tax_code) DO UPDATE SET
             name=excluded.name,
@@ -94,13 +145,17 @@ function saveCompany(companyData) {
             status=excluded.status,
             main_business=excluded.main_business,
             last_updated_at=excluded.last_updated_at,
+            search_text=excluded.search_text,
             updated_at=CURRENT_TIMESTAMP
     `);
+
     return stmt.run({
         tax_address: '',
         company_type: '',
         last_updated_at: '',
-        ...companyData
+        raw_html: '',
+        ...companyData,
+        search_text: searchText
     });
 }
 
@@ -108,5 +163,6 @@ module.exports = {
     db,
     findCompanyByTaxCode,
     searchCompanies,
-    saveCompany
+    saveCompany,
+    removeVietnameseTones
 };
