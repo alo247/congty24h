@@ -59,7 +59,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <td><strong>${c.tax_code}</strong></td>
                 <td>${c.name}</td>
                 <td>${c.representative || '-'}</td>
-                <td>${c.address || '-'}</td>
+                <td>${c.address || c.tax_address || '-'}</td>
                 <td>${c.main_business || '-'}</td>
                 <td>
                     <span class="badge ${fromCache ? 'badge-cache' : 'badge-fresh'}">
@@ -69,7 +69,7 @@ document.addEventListener('DOMContentLoaded', () => {
             </tr>
         `).join('');
 
-        // Thêm sự kiện click để mở modal xem chi tiết
+        // Bấm vào dòng để mở xem chi tiết đầy đủ 14 trường thông tin
         document.querySelectorAll('#resultsBody tr').forEach(row => {
             row.addEventListener('click', () => {
                 const index = row.getAttribute('data-index');
@@ -84,15 +84,18 @@ document.addEventListener('DOMContentLoaded', () => {
         modalTitle.textContent = c.name;
         modalBody.innerHTML = `
             <div class="detail-item"><label>Mã số thuế</label><span>${c.tax_code}</span></div>
+            <div class="detail-item"><label>Địa chỉ trụ sở</label><span>${c.address || '-'}</span></div>
+            <div class="detail-item"><label>Địa chỉ Thuế</label><span>${c.tax_address || c.address || '-'}</span></div>
+            <div class="detail-item"><label>Trạng thái / Tình trạng</label><span>${c.status || 'Đang hoạt động'}</span></div>
             <div class="detail-item"><label>Tên quốc tế</label><span>${c.international_name || '-'}</span></div>
             <div class="detail-item"><label>Tên viết tắt</label><span>${c.short_name || '-'}</span></div>
             <div class="detail-item"><label>Người đại diện pháp luật</label><span>${c.representative || '-'}</span></div>
-            <div class="detail-item"><label>Địa chỉ trụ sở</label><span>${c.address || '-'}</span></div>
-            <div class="detail-item"><label>Số điện thoại</label><span>${c.phone || '-'}</span></div>
-            <div class="detail-item"><label>Chi cục thuế quản lý</label><span>${c.managed_by || '-'}</span></div>
-            <div class="detail-item"><label>Trạng thái hoạt động</label><span>${c.status || 'Đang hoạt động'}</span></div>
+            <div class="detail-item"><label>Điện thoại</label><span>${c.phone || '-'}</span></div>
+            <div class="detail-item"><label>Ngày hoạt động / Ngày cấp</label><span>${c.license_date || '-'}</span></div>
+            <div class="detail-item"><label>Quản lý bởi (Chi cục Thuế)</label><span>${c.managed_by || '-'}</span></div>
+            <div class="detail-item"><label>Loại hình doanh nghiệp</label><span>${c.company_type || '-'}</span></div>
             <div class="detail-item"><label>Ngành nghề kinh doanh chính</label><span>${c.main_business || '-'}</span></div>
-            <div class="detail-item"><label>Ngày cấp giấy phép</label><span>${c.license_date || '-'}</span></div>
+            <div class="detail-item"><label>Cập nhật lần cuối</label><span>${c.last_updated_at || '-'}</span></div>
         `;
         detailModal.style.display = 'flex';
     }
@@ -120,6 +123,5 @@ document.addEventListener('DOMContentLoaded', () => {
         window.location.href = `/api/export/csv?${params.toString()}`;
     });
 
-    // Khởi tạo ban đầu
     loadCompanies();
 });

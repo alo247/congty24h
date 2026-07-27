@@ -1,5 +1,5 @@
 // src/server.js
-// Máy chủ Express Backend phục vụ API tra cứu mã số thuế và xuất file CSV (Đã tối ưu cho Vercel & Tự động cào danh sách)
+// Máy chủ Express Backend phục vụ API tra cứu mã số thuế và xuất file CSV (Hỗ trợ 14 trường thông tin chi tiết)
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -42,7 +42,7 @@ app.get('/api/company/:taxCode', async (req, res) => {
     }
 });
 
-// API Tra cứu danh sách theo Từ khóa / Địa điểm / Ngành nghề (Tự động cào dữ liệu tươi nếu CSDL chưa có)
+// API Tra cứu danh sách theo Từ khóa / Địa điểm / Ngành nghề
 app.get('/api/companies/search', async (req, res) => {
     try {
         const { query, location, business } = req.query;
@@ -56,7 +56,6 @@ app.get('/api/companies/search', async (req, res) => {
             const msts = await scrapeSearchList(searchKeyword);
 
             if (msts.length > 0) {
-                // Lấy tối đa 10 MST để cào chi tiết và nạp vào CSDL
                 const mstsToScrape = msts.slice(0, 10);
                 for (const mst of mstsToScrape) {
                     if (!findCompanyByTaxCode(mst)) {
@@ -68,10 +67,8 @@ app.get('/api/companies/search', async (req, res) => {
                     }
                 }
 
-                // Query lại CSDL SQLite sau khi đã nạp dữ liệu tươi
                 results = searchCompanies({ taxCodeOrName: query, location, business });
                 if (results.length === 0) {
-                    // Trả về danh sách vừa cào nếu câu query SQL quá khắt khe
                     results = mstsToScrape.map(mst => findCompanyByTaxCode(mst)).filter(Boolean);
                 }
             }
@@ -84,25 +81,28 @@ app.get('/api/companies/search', async (req, res) => {
     }
 });
 
-// API Xuất file CSV (Chuẩn UTF-8 BOM mở trực tiếp trên Excel & Google Sheets không bị lỗi phông)
+// API Xuất file CSV (Đầy đủ 14 trường thông tin chi tiết)
 app.get('/api/export/csv', (req, res) => {
     try {
         const { query, location, business } = req.query;
         const companies = searchCompanies({ taxCodeOrName: query, location, business });
 
-        // Ký tự UTF-8 BOM để Excel nhận diện chuẩn tiếng Việt
         let csv = '\uFEFF';
-        csv += 'Mã Số Thuế,Tên Công Ty,Tên Quốc Tế,Người Đại Diện,Địa Chỉ,Điện Thoại,Trạng Thái,Ngành Nghề,Ngày Cấp\n';
+        csv += 'Mã Số Thuế,Tên Công Ty,Tên Quốc Tế,Tên Viết Tắt,Người Đại Diện,Địa Chỉ Trụ Sở,Địa Chỉ Thuế,Điện Thoại,Trạng Thái,Loại Hình DN,Chi Cục Thuế Quản Lý,Ngành Nghề Chính,Ngày Cấp\n';
 
         companies.forEach(c => {
             const row = [
                 `"${c.tax_code || ''}"`,
                 `"${(c.name || '').replace(/"/g, '""')}"`,
                 `"${(c.international_name || '').replace(/"/g, '""')}"`,
+                `"${(c.short_name || '').replace(/"/g, '""')}"`,
                 `"${(c.representative || '').replace(/"/g, '""')}"`,
                 `"${(c.address || '').replace(/"/g, '""')}"`,
+                `"${(c.tax_address || '').replace(/"/g, '""')}"`,
                 `"${c.phone || ''}"`,
                 `"${c.status || ''}"`,
+                `"${(c.company_type || '').replace(/"/g, '""')}"`,
+                `"${(c.managed_by || '').replace(/"/g, '""')}"`,
                 `"${(c.main_business || '').replace(/"/g, '""')}"`,
                 `"${c.license_date || ''}"`
             ];
@@ -110,7 +110,7 @@ app.get('/api/export/csv', (req, res) => {
         });
 
         res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-        res.setHeader('Content-Disposition', 'attachment; filename=danh_sach_cong_ty_masothue.csv');
+        res.setHeader('Content-Disposition', 'attachment; filename=danh_sach_cong_ty_chi_tiet.csv');
         res.send(csv);
     } catch (error) {
         console.error('[Export CSV Error]', error);
@@ -118,7 +118,6 @@ app.get('/api/export/csv', (req, res) => {
     }
 });
 
-// Export app cho Vercel Serverless Function handler
 module.exports = app;
 
 if (require.main === module) {
