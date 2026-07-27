@@ -1,5 +1,5 @@
 // src/scraper.js
-// Module cào & trích xuất ĐẦY ĐỦ thông tin chi tiết từ VietQR API + Masothue Engine + Tự động liên kết Thư Viện Pháp Luật
+// Module cào dữ liệu SONG SONG từ cả 2 nguồn masothue.com VÀ thuvienphapluat.vn
 const axios = require('axios');
 const cheerio = require('cheerio');
 
@@ -42,14 +42,14 @@ function cleanPhone(rawText) {
 }
 
 /**
- * Cào / Trích xuất chi tiết thông tin công ty bằng cơ chế Đa Nguồn (VietQR API + Masothue Engine + Thư Viện Pháp Luật)
+ * Cào / Trích xuất chi tiết thông tin công ty từ VietQR API + Masothue + Thư Viện Pháp Luật
  * @param {string} taxCode 
  * @returns {object|null}
  */
 async function scrapeCompanyDetail(taxCode) {
     const cleanTaxCode = taxCode.trim();
 
-    // 1. Thử VietQR Business API (Siêu tốc & Không bị WAF/Cloudflare 403 trên Vercel)
+    // 1. VietQR Business API
     try {
         const vietQrUrl = `https://api.vietqr.io/v2/business/${encodeURIComponent(cleanTaxCode)}`;
         const vres = await axios.get(vietQrUrl, { timeout: 6000 });
@@ -78,7 +78,7 @@ async function scrapeCompanyDetail(taxCode) {
         console.log(`[VietQR API Miss] ${cleanTaxCode}:`, e.message);
     }
 
-    // 2. Fallback: Cào từ masothue.com nếu VietQR không tìm thấy
+    // 2. Masothue.com HTML Scraper
     try {
         const url = `https://masothue.com/Search/?q=${encodeURIComponent(cleanTaxCode)}&type=auto`;
         const response = await axios.get(url, { headers: ENHANCED_HEADERS, timeout: 10000 });
@@ -141,31 +141,51 @@ async function scrapeCompanyDetail(taxCode) {
 }
 
 /**
- * Cào danh sách các Mã số thuế từ trang tìm kiếm
+ * Cào danh sách các Mã số thuế SONG SONG từ cả 2 nguồn: masothue.com VÀ thuvienphapluat.vn
  * @param {string} keyword 
- * @returns {Array<string>} Danh sách mã số thuế lấy được
+ * @returns {Promise<Array<string>>} Danh sách mã số thuế hợp nhất từ 2 nguồn
  */
 async function scrapeSearchList(keyword) {
+    const foundMsts = new Set();
+    const encoded = encodeURIComponent(keyword);
+
+    // Nguồn 1: masothue.com
     try {
-        const url = `https://masothue.com/Search/?q=${encodeURIComponent(keyword)}`;
-        const response = await axios.get(url, { headers: ENHANCED_HEADERS, timeout: 10000 });
-        const $ = cheerio.load(response.data);
-
-        const foundMsts = new Set();
-
-        $('a').each((i, el) => {
-            const href = $(el).attr('href') || '';
+        const urlMasothue = `https://masothue.com/Search/?q=${encoded}`;
+        const res1 = await axios.get(urlMasothue, { headers: ENHANCED_HEADERS, timeout: 8000 });
+        const $1 = cheerio.load(res1.data);
+        $1('a').each((i, el) => {
+            const href = $1(el).attr('href') || '';
             const match = href.match(/\/(\d{10}(-\d{3})?)/);
-            if (match && match[1]) {
-                foundMsts.add(match[1]);
+            if (match && match[1]) foundMsts.add(match[1]);
+        });
+    } catch (e) {
+        console.log(`[Scraper Engine 1 - Masothue] "${keyword}":`, e.message);
+    }
+
+    // Nguồn 2: thuvienphapluat.vn
+    try {
+        const urlTvpl = `https://thuvienphapluat.vn/ma-so-thue/tim-kiem?q=${encoded}`;
+        const res2 = await axios.get(urlTvpl, { headers: ENHANCED_HEADERS, timeout: 8000 });
+        const $2 = cheerio.load(res2.data);
+        $2('a').each((i, el) => {
+            const href = $2(el).attr('href') || '';
+            const text = $2(el).text();
+            const matches = (href + ' ' + text).match(/mst-(\d{10}(-\d{3})?)|(\d{10}(-\d{3})?)/g);
+            if (matches) {
+                matches.forEach(m => {
+                    const mst = m.replace('mst-', '');
+                    if (mst.length >= 10 && !mst.startsWith('1900') && !mst.startsWith('024') && !mst.startsWith('028')) {
+                        foundMsts.add(mst);
+                    }
+                });
             }
         });
-
-        return Array.from(foundMsts);
-    } catch (error) {
-        console.error(`[Scraper Error] Lỗi cào trang danh sách cho từ khóa "${keyword}":`, error.message);
-        return [];
+    } catch (e) {
+        console.log(`[Scraper Engine 2 - Thư Viện Pháp Luật] "${keyword}":`, e.message);
     }
+
+    return Array.from(foundMsts);
 }
 
 module.exports = {
